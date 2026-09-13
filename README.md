@@ -90,6 +90,7 @@ button that publishes exists.
 | # | Crash | What the app proposed | CI | Merged |
 |---|---|---|---|---|
 | [#1](https://github.com/ioscastaway/self-pr/pull/1) | `NumberFormatException: For input string: "12.5"` at `BillSplitter.split` | Parse the amount as a decimal rounded to whole units and the people count as a positive integer, raise a typed `InvalidInput` with a user-facing message, catch exactly that one type in the view model, add `BillSplitterInputTest` (7 cases). Confidence 0.85. Four caveats, including "I could not compile or run the tests on device; CI on this PR is the first real check." | pass (20 tests, 4m05s) | pending |
+| [#3](https://github.com/ioscastaway/self-pr/pull/3) | `NoSuchElementException: List is empty.` at `BillSplitter.lastSplit` | `lastSplit` returns `Result?` via `lastOrNull()`; `showLast()` shows "No splits yet." on null; new `BillSplitterLastSplitTest`. Two source lines changed. Confidence 0.88. Caveat: the return type changed, so any caller outside the bundle needs a null check. Filed with a fine-grained token scoped to this repository. | pass | pending |
 
 ## Architecture
 
@@ -127,9 +128,14 @@ a file is not in that list the app cannot see it and will not patch it.
 - **The trace carries user input.** `For input string: "12.5"` went to the model and into the PR
   body. For a bill amount that is nothing; for a real app it is the one place this design leaks
   user data, and the redaction has to happen before the trace leaves the process.
-- **"Confidence" is a claim, CI is a measurement.** The app reported 0.85; CI reported pass. The
-  table above is the only number that matters, and it needs many more rows before the second tap
-  can go away.
+- **"Confidence" is a claim, CI is a measurement.** The app reported 0.85 and 0.88; CI reported
+  pass twice. The table above is the only number that matters, and it needs many more rows before
+  the second tap can go away.
+- **The smallest correct fix is a sign of a good diagnosis.** For the empty-history crash the
+  model changed two source lines (`last()` → `lastOrNull()`, a null message in the view model)
+  and wrote a test, then flagged the one real consequence: a changed return type that any caller
+  outside the bundle would need to know about. It did not touch the two bugs it had already
+  fixed in #1, because #1 was not merged and the bundled source it saw was still the original.
 
 ## iOS comparison
 
