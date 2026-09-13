@@ -10,8 +10,11 @@ PR; a human merges. The app cannot run its own tests, so it files the paperwork 
 > CI argue.
 
 **Series:** Evolving App (stage 3) · Android × AI
-**Status:** see the bottom of *Experiment* for the log of pull requests the app has filed about
-itself, each with what CI said.
+**Status:** the loop has closed once. On 2026-09-13 the app crashed on the Android 16 emulator
+(`NumberFormatException` on a decimal bill amount), diagnosed itself at its next launch, and opened
+[pull request #1](https://github.com/ioscastaway/self-pr/pull/1) with a three-file fix and a new
+test. CI passed. The table at the bottom of *Experiment* is the running log; merging is the
+human's job and is recorded there too.
 
 ## Why I built this
 
@@ -86,7 +89,7 @@ button that publishes exists.
 
 | # | Crash | What the app proposed | CI | Merged |
 |---|---|---|---|---|
-| _(none yet)_ | | | | |
+| [#1](https://github.com/ioscastaway/self-pr/pull/1) | `NumberFormatException: For input string: "12.5"` at `BillSplitter.split` | Parse the amount as a decimal rounded to whole units and the people count as a positive integer, raise a typed `InvalidInput` with a user-facing message, catch exactly that one type in the view model, add `BillSplitterInputTest` (7 cases). Confidence 0.85. Four caveats, including "I could not compile or run the tests on device; CI on this PR is the first real check." | pass (20 tests, 4m05s) | pending |
 
 ## Architecture
 
@@ -103,7 +106,30 @@ a file is not in that list the app cannot see it and will not patch it.
 
 ## What I learned
 
-_(filled from real runs; see the table above)_
+- **The diagnosis was better than the bug deserved.** Given the trace, the notes and two source
+  files, the model fixed the crash at the input boundary rather than at the throw site, noticed
+  the divide-by-zero one line later and fixed it in the same change, declined to fix the third bug
+  (`history.last()`) because it was a different crash, and said so in a caveat. It also wrote a
+  test that reproduces the exact string from the trace. This is what a careful reviewer would have
+  asked for.
+- **The validator earned its place before the model misbehaved.** Nothing was refused in the first
+  run, but the rules (bundled files only, tests may be new, no `..`) are the difference between
+  "an app that edits its own repository" and "an app that edits a repository". They are code, not
+  prompt, on purpose.
+- **Whole-file patches are the right size here and the wrong size later.** Three files, under
+  three kilobytes each, came back complete at `effort: high` in about eighty seconds. A file ten
+  times that size would hit `max_tokens` and the diagnoser would refuse it rather than apply a
+  truncated file. Stage 3 on a real app needs diffs, and diffs need a validator that can apply
+  them.
+- **The contents API means one commit per file.** The PR had three commits with the same message.
+  Harmless with squash-merge, ugly otherwise; the Git Data API (blob → tree → commit) would make
+  it one commit and is the next change to `GitHubPublisher`.
+- **The trace carries user input.** `For input string: "12.5"` went to the model and into the PR
+  body. For a bill amount that is nothing; for a real app it is the one place this design leaks
+  user data, and the redaction has to happen before the trace leaves the process.
+- **"Confidence" is a claim, CI is a measurement.** The app reported 0.85; CI reported pass. The
+  table above is the only number that matters, and it needs many more rows before the second tap
+  can go away.
 
 ## iOS comparison
 
@@ -155,7 +181,11 @@ Then break the bill splitter, reopen the app, and go to Heal.
 
 ## Verdict
 
-_(after the first pull requests)_
+Genuinely useful, in the narrow sense that the pull request it opened is one I would have merged
+from a colleague, test included. Merely possible, in the wide sense that one crash on one demo
+feature proves the pipeline and nothing about the hit rate. The honest claim is structural: an
+Android app can capture its own death, read its own source, argue for a fix and file it, with
+public APIs and two taps, and the only thing it cannot do for itself is the one thing CI does.
 
 ## Next
 
@@ -169,5 +199,5 @@ _(after the first pull requests)_
 
 ---
 
-**Reason I don't regret switching to Android** (reserved for this series, to be written once the
-loop has closed): On this planet, an app is allowed to rewrite itself.
+**Reason #09 I don't regret switching to Android:**
+On this planet, an app is allowed to rewrite itself.
