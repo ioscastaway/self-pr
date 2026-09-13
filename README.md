@@ -10,11 +10,12 @@ PR; a human merges. The app cannot run its own tests, so it files the paperwork 
 > CI argue.
 
 **Series:** Evolving App (stage 3) · Android × AI
-**Status:** the loop has closed once. On 2026-09-13 the app crashed on the Android 16 emulator
-(`NumberFormatException` on a decimal bill amount), diagnosed itself at its next launch, and opened
-[pull request #1](https://github.com/ioscastaway/self-pr/pull/1) with a three-file fix and a new
-test. CI passed. The table at the bottom of *Experiment* is the running log; merging is the
-human's job and is recorded there too.
+**Status:** the loop has closed twice. On 2026-09-13 the app crashed on the Android 16 emulator,
+diagnosed itself at its next launch, and opened [#1](https://github.com/ioscastaway/self-pr/pull/1)
+(decimal bill amount) and [#3](https://github.com/ioscastaway/self-pr/pull/3) (empty history), each
+with a fix and a new test. CI passed on both and both are merged, so the host feature is now
+fixed by its own app and needs new first-draft bugs. The table at the bottom of *Experiment* is
+the running log.
 
 ## Why I built this
 
@@ -59,14 +60,15 @@ one has no third-party path on iOS.
 The host feature is a bill splitter, written the way first drafts get written. It works for the
 inputs the author tried and crashes on the ones they did not:
 
-| Input | Crash | Line |
-|---|---|---|
-| `12.5` or an empty amount | `NumberFormatException` | `amountText.trim().toInt()` |
-| `0` people | `ArithmeticException: divide by zero` | `(amount + tip) / people` |
-| *Show last* before any split | `NoSuchElementException` | `history.last()` |
+| Input | Crash | Line | Fixed by |
+|---|---|---|---|
+| `12.5` or an empty amount | `NumberFormatException` | `amountText.trim().toInt()` | the app, #1 |
+| `0` people | `ArithmeticException: divide by zero` | `(amount + tip) / people` | the app, #1 (it noticed the next line while fixing the first) |
+| *Show last* before any split | `NoSuchElementException` | `history.last()` | the app, #3 |
 
-None of these is a planted `throw`. They are the three bugs a reviewer would find in the first
-five minutes, left in so the app has something real to fix.
+None of these was a planted `throw`. They were the three bugs a reviewer would find in the first
+five minutes, left in so the app had something real to fix. All three are gone now, by the app's
+own pull requests; the next round needs a fresh first draft.
 
 ```
 crash ──► CrashCollector ──► CrashReport (trace, build, device)
@@ -89,8 +91,8 @@ button that publishes exists.
 
 | # | Crash | What the app proposed | CI | Merged |
 |---|---|---|---|---|
-| [#1](https://github.com/ioscastaway/self-pr/pull/1) | `NumberFormatException: For input string: "12.5"` at `BillSplitter.split` | Parse the amount as a decimal rounded to whole units and the people count as a positive integer, raise a typed `InvalidInput` with a user-facing message, catch exactly that one type in the view model, add `BillSplitterInputTest` (7 cases). Confidence 0.85. Four caveats, including "I could not compile or run the tests on device; CI on this PR is the first real check." | pass (20 tests, 4m05s) | pending |
-| [#3](https://github.com/ioscastaway/self-pr/pull/3) | `NoSuchElementException: List is empty.` at `BillSplitter.lastSplit` | `lastSplit` returns `Result?` via `lastOrNull()`; `showLast()` shows "No splits yet." on null; new `BillSplitterLastSplitTest`. Two source lines changed. Confidence 0.88. Caveat: the return type changed, so any caller outside the bundle needs a null check. Filed with a fine-grained token scoped to this repository. | pass | pending |
+| [#1](https://github.com/ioscastaway/self-pr/pull/1) | `NumberFormatException: For input string: "12.5"` at `BillSplitter.split` | Parse the amount as a decimal rounded to whole units and the people count as a positive integer, raise a typed `InvalidInput` with a user-facing message, catch exactly that one type in the view model, add `BillSplitterInputTest` (7 cases). Confidence 0.85. Four caveats, including "I could not compile or run the tests on device; CI on this PR is the first real check." | pass (20 tests, 4m05s) | yes |
+| [#3](https://github.com/ioscastaway/self-pr/pull/3) | `NoSuchElementException: List is empty.` at `BillSplitter.lastSplit` | `lastSplit` returns `Result?` via `lastOrNull()`; `showLast()` shows "No splits yet." on null; new `BillSplitterLastSplitTest`. Two source lines changed. Confidence 0.88. Caveat: the return type changed, so any caller outside the bundle needs a null check. Filed with a fine-grained token scoped to this repository. | pass, twice: once as filed, once after the human merged `main` into it | yes, after a hand-resolved conflict with #1 |
 
 ## Architecture
 
@@ -131,6 +133,12 @@ a file is not in that list the app cannot see it and will not patch it.
 - **"Confidence" is a claim, CI is a measurement.** The app reported 0.85 and 0.88; CI reported
   pass twice. The table above is the only number that matters, and it needs many more rows before
   the second tap can go away.
+- **Two whole-file PRs from the same base cannot both merge.** #1 and #3 each replaced
+  `BillSplitter.kt` in full from the same revision, so the second one conflicted once the first
+  was in. A human merged `main` into #3 and kept both changes; CI passed again. The app cannot do
+  that step today: it would need to re-diagnose against the new base, which means the bundled
+  source must be the source of `main`, not of the build that crashed. Diff-shaped patches would
+  make most of these conflicts disappear; the rest are stage 3.5.
 - **The smallest correct fix is a sign of a good diagnosis.** For the empty-history crash the
   model changed two source lines (`last()` → `lastOrNull()`, a null message in the view model)
   and wrote a test, then flagged the one real consequence: a changed return type that any caller
