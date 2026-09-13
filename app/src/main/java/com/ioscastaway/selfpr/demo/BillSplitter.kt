@@ -16,7 +16,8 @@ object BillSplitter {
         return Result(amount, people, tipPercent, tip, perPerson)
     }
 
-    fun lastSplit(history: List<Result>): Result = history.last()
+    /** Null when nothing has been split yet; an empty history is not an error. */
+    fun lastSplit(history: List<Result>): Result? = history.lastOrNull()
 
     fun format(r: Result): String =
         "${r.people} people, ${r.tipPercent}% tip (${r.tipTotal}): ${r.perPerson} each"
