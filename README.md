@@ -10,8 +10,12 @@ PR; a human merges. The app cannot run its own tests, so it files the paperwork 
 > CI argue.
 
 **Series:** Evolving App (stage 3) · Android × AI
-**Status:** see the bottom of *Experiment* for the log of pull requests the app has filed about
-itself, each with what CI said.
+**Status:** the loop has closed twice. On 2026-09-13 the app crashed on the Android 16 emulator,
+diagnosed itself at its next launch, and opened [#1](https://github.com/ioscastaway/self-pr/pull/1)
+(decimal bill amount) and [#3](https://github.com/ioscastaway/self-pr/pull/3) (empty history), each
+with a fix and a new test. CI passed on both and both are merged, so the host feature is now
+fixed by its own app and needs new first-draft bugs. The table at the bottom of *Experiment* is
+the running log.
 
 ## Why I built this
 
@@ -56,14 +60,15 @@ one has no third-party path on iOS.
 The host feature is a bill splitter, written the way first drafts get written. It works for the
 inputs the author tried and crashes on the ones they did not:
 
-| Input | Crash | Line |
-|---|---|---|
-| `12.5` or an empty amount | `NumberFormatException` | `amountText.trim().toInt()` |
-| `0` people | `ArithmeticException: divide by zero` | `(amount + tip) / people` |
-| *Show last* before any split | `NoSuchElementException` | `history.last()` |
+| Input | Crash | Line | Fixed by |
+|---|---|---|---|
+| `12.5` or an empty amount | `NumberFormatException` | `amountText.trim().toInt()` | the app, #1 |
+| `0` people | `ArithmeticException: divide by zero` | `(amount + tip) / people` | the app, #1 (it noticed the next line while fixing the first) |
+| *Show last* before any split | `NoSuchElementException` | `history.last()` | the app, #3 |
 
-None of these is a planted `throw`. They are the three bugs a reviewer would find in the first
-five minutes, left in so the app has something real to fix.
+None of these was a planted `throw`. They were the three bugs a reviewer would find in the first
+five minutes, left in so the app had something real to fix. All three are gone now, by the app's
+own pull requests; the next round needs a fresh first draft.
 
 ```
 crash ──► CrashCollector ──► CrashReport (trace, build, device)
@@ -86,7 +91,8 @@ button that publishes exists.
 
 | # | Crash | What the app proposed | CI | Merged |
 |---|---|---|---|---|
-| _(none yet)_ | | | | |
+| [#1](https://github.com/ioscastaway/self-pr/pull/1) | `NumberFormatException: For input string: "12.5"` at `BillSplitter.split` | Parse the amount as a decimal rounded to whole units and the people count as a positive integer, raise a typed `InvalidInput` with a user-facing message, catch exactly that one type in the view model, add `BillSplitterInputTest` (7 cases). Confidence 0.85. Four caveats, including "I could not compile or run the tests on device; CI on this PR is the first real check." | pass (20 tests, 4m05s) | yes |
+| [#3](https://github.com/ioscastaway/self-pr/pull/3) | `NoSuchElementException: List is empty.` at `BillSplitter.lastSplit` | `lastSplit` returns `Result?` via `lastOrNull()`; `showLast()` shows "No splits yet." on null; new `BillSplitterLastSplitTest`. Two source lines changed. Confidence 0.88. Caveat: the return type changed, so any caller outside the bundle needs a null check. Filed with a fine-grained token scoped to this repository. | pass, twice: once as filed, once after the human merged `main` into it | yes, after a hand-resolved conflict with #1 |
 
 ## Architecture
 
@@ -103,7 +109,41 @@ a file is not in that list the app cannot see it and will not patch it.
 
 ## What I learned
 
-_(filled from real runs; see the table above)_
+- **The diagnosis was better than the bug deserved.** Given the trace, the notes and two source
+  files, the model fixed the crash at the input boundary rather than at the throw site, noticed
+  the divide-by-zero one line later and fixed it in the same change, declined to fix the third bug
+  (`history.last()`) because it was a different crash, and said so in a caveat. It also wrote a
+  test that reproduces the exact string from the trace. This is what a careful reviewer would have
+  asked for.
+- **The validator earned its place before the model misbehaved.** Nothing was refused in the first
+  run, but the rules (bundled files only, tests may be new, no `..`) are the difference between
+  "an app that edits its own repository" and "an app that edits a repository". They are code, not
+  prompt, on purpose.
+- **Whole-file patches are the right size here and the wrong size later.** Three files, under
+  three kilobytes each, came back complete at `effort: high` in about eighty seconds. A file ten
+  times that size would hit `max_tokens` and the diagnoser would refuse it rather than apply a
+  truncated file. Stage 3 on a real app needs diffs, and diffs need a validator that can apply
+  them.
+- **The contents API means one commit per file.** The PR had three commits with the same message.
+  Harmless with squash-merge, ugly otherwise; the Git Data API (blob → tree → commit) would make
+  it one commit and is the next change to `GitHubPublisher`.
+- **The trace carries user input.** `For input string: "12.5"` went to the model and into the PR
+  body. For a bill amount that is nothing; for a real app it is the one place this design leaks
+  user data, and the redaction has to happen before the trace leaves the process.
+- **"Confidence" is a claim, CI is a measurement.** The app reported 0.85 and 0.88; CI reported
+  pass twice. The table above is the only number that matters, and it needs many more rows before
+  the second tap can go away.
+- **Two whole-file PRs from the same base cannot both merge.** #1 and #3 each replaced
+  `BillSplitter.kt` in full from the same revision, so the second one conflicted once the first
+  was in. A human merged `main` into #3 and kept both changes; CI passed again. The app cannot do
+  that step today: it would need to re-diagnose against the new base, which means the bundled
+  source must be the source of `main`, not of the build that crashed. Diff-shaped patches would
+  make most of these conflicts disappear; the rest are stage 3.5.
+- **The smallest correct fix is a sign of a good diagnosis.** For the empty-history crash the
+  model changed two source lines (`last()` → `lastOrNull()`, a null message in the view model)
+  and wrote a test, then flagged the one real consequence: a changed return type that any caller
+  outside the bundle would need to know about. It did not touch the two bugs it had already
+  fixed in #1, because #1 was not merged and the bundled source it saw was still the original.
 
 ## iOS comparison
 
@@ -155,7 +195,11 @@ Then break the bill splitter, reopen the app, and go to Heal.
 
 ## Verdict
 
-_(after the first pull requests)_
+Genuinely useful, in the narrow sense that the pull request it opened is one I would have merged
+from a colleague, test included. Merely possible, in the wide sense that one crash on one demo
+feature proves the pipeline and nothing about the hit rate. The honest claim is structural: an
+Android app can capture its own death, read its own source, argue for a fix and file it, with
+public APIs and two taps, and the only thing it cannot do for itself is the one thing CI does.
 
 ## Next
 
@@ -169,5 +213,5 @@ _(after the first pull requests)_
 
 ---
 
-**Reason I don't regret switching to Android** (reserved for this series, to be written once the
-loop has closed): On this planet, an app is allowed to rewrite itself.
+**Reason #09 I don't regret switching to Android:**
+On this planet, an app is allowed to rewrite itself.
