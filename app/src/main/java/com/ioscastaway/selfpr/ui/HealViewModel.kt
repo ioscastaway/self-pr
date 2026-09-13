@@ -32,7 +32,12 @@ class HealViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Runs on the main thread on purpose: a bug here is a real crash, which is the point. */
     fun split() {
-        val r = BillSplitter.split(amount, people, tip)
+        val r = try {
+            BillSplitter.split(amount, people, tip)
+        } catch (e: BillSplitter.InvalidInput) {
+            message = e.message
+            return
+        }
         history += r
         lastOutput = BillSplitter.format(r)
     }
