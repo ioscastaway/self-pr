@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A bandage over a git branch. Vector so no PNG set is needed. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#F2F4FF" android:strokeWidth="4" android:fillColor="#00000000"
+        android:pathData="M40,30 L40,78 M40,46 C40,60 68,50 68,64" />
+    <path android:fillColor="#F2F4FF" android:pathData="M40,24 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#F2F4FF" android:pathData="M68,40 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#F2F4FF" android:pathData="M40,84 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <group android:rotation="-35" android:pivotX="66" android:pivotY="74">
+        <path android:fillColor="#F2A93B" android:pathData="M48,68 h36 a6,6 0 0 1 0,12 h-36 a6,6 0 0 1 0,-12z" />
+        <path android:fillColor="#1B1F3B" android:pathData="M62,72 h8 v4 h-8z" />
+    </group>
+</vector>
