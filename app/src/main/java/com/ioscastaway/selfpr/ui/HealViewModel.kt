@@ -38,7 +38,8 @@ class HealViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showLast() {
-        lastOutput = "Last: " + BillSplitter.format(BillSplitter.lastSplit(history))
+        val last = BillSplitter.lastSplit(history)
+        lastOutput = if (last == null) "No splits yet." else "Last: " + BillSplitter.format(last)
     }
 
     // ---- the healer ----
