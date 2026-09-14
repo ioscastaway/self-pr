@@ -7,6 +7,12 @@
         to GitHub). Nothing about the user goes anywhere; the app only ever talks about itself.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+        Stage 4. The app downloads the APK that CI built from its own merged pull request and
+        installs it over itself through PackageInstaller. The grant is per app, in Settings
+        ("Install unknown apps"); every install still goes through the system's own dialog.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".App"
@@ -25,5 +31,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- PackageInstaller reports the session's fate here: the user-action request, success, or why not. -->
+        <receiver
+            android:name=".platform.InstallResultReceiver"
+            android:exported="false" />
     </application>
 </manifest>

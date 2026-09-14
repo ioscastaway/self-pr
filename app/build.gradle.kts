@@ -8,11 +8,15 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// The app knows which revision of itself it is running. Every pull request it opens names it.
-val gitSha: Provider<String> = providers.exec {
-    commandLine("git", "rev-parse", "--short", "HEAD")
-    isIgnoreExitValue = true
-}.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
+// The app knows which revision of itself it is running. Every pull request it opens names it, and
+// stage 4 compares it with the revision CI built. CI passes the sha in explicitly (on a pull
+// request HEAD is a merge commit that exists nowhere else), local builds ask git.
+val gitSha: Provider<String> = providers.environmentVariable("SELF_PR_GIT_SHA").orElse(
+    providers.exec {
+        commandLine("git", "rev-parse", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText
+).map { it.trim().ifEmpty { "unknown" } }
 
 // Keys come from local.properties (git-ignored) and reach the app through BuildConfig. Empty values
 // are allowed so CI can build without them; the Heal tab then explains what is missing.
@@ -21,6 +25,12 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 fun secret(name: String): String = localProps.getProperty(name) ?: System.getenv(name) ?: ""
+
+// Stage 4: the app installs builds that CI made. Android only lets a package update itself when
+// both APKs carry the same signature, so the local build and the CI build share one key. It lives
+// outside the repository (path in local.properties here, a base64 secret decoded to a file in CI);
+// without it the build falls back to the default debug key and the Update tab says so.
+val updateKeystore: File? = secret("SELF_PR_KEYSTORE").takeIf { it.isNotBlank() }?.let(::File)?.takeIf { it.exists() }
 
 // The knowledge base: the app's own sources, tests, build file and architecture notes, zipped at
 // build time and bundled as an asset. This is what the app reads when it diagnoses itself.
@@ -51,9 +61,26 @@ android {
         buildConfigField("String", "CLAUDE_MODEL", "\"claude-opus-5\"")
         buildConfigField("String", "SELF_REPO", "\"ioscastaway/self-pr\"")
         buildConfigField("String", "SELF_BASE_BRANCH", "\"main\"")
+        buildConfigField("String", "CI_WORKFLOW", "\"ci.yml\"")
+        buildConfigField("String", "CI_ARTIFACT", "\"app-debug\"")
+        buildConfigField("boolean", "SIGNED_FOR_UPDATE", "${updateKeystore != null}")
+    }
+
+    signingConfigs {
+        if (updateKeystore != null) {
+            create("update") {
+                storeFile = updateKeystore
+                storePassword = secret("SELF_PR_KEYSTORE_PASSWORD")
+                keyAlias = secret("SELF_PR_KEY_ALIAS").ifBlank { "self-pr" }
+                keyPassword = secret("SELF_PR_KEY_PASSWORD").ifBlank { secret("SELF_PR_KEYSTORE_PASSWORD") }
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            if (updateKeystore != null) signingConfig = signingConfigs.getByName("update")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,12 +61,13 @@ fun SelfPrApp(vm: HealViewModel) {
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(listOf("Bill splitter", "Heal", "About")[tab]) }) },
+        topBar = { TopAppBar(title = { Text(listOf("Bill splitter", "Heal", "Update", "About")[tab]) }) },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Default.Calculate, null) }, label = { Text("Split") })
                 NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Default.Build, null) }, label = { Text("Heal") })
-                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.Info, null) }, label = { Text("About") })
+                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.SystemUpdate, null) }, label = { Text("Update") })
+                NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.Info, null) }, label = { Text("About") })
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -74,6 +76,7 @@ fun SelfPrApp(vm: HealViewModel) {
         when (tab) {
             0 -> SplitScreen(vm, m)
             1 -> HealScreen(vm, m)
+            2 -> UpdateScreen(vm, m)
             else -> AboutScreen(vm, m)
         }
     }
@@ -167,14 +170,33 @@ private fun DiagnosisView(vm: HealViewModel, d: Diagnosis) {
 private fun AboutScreen(vm: HealViewModel, modifier: Modifier) {
     var showNotes by remember { mutableStateOf(false) }
     Column(modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Build ${BuildConfig.VERSION_NAME} @ ${BuildConfig.GIT_SHA}", style = MaterialTheme.typography.titleMedium)
+        Text("Build ${BuildConfig.VERSION_NAME} @ ${BuildConfig.GIT_SHA.take(7)}", style = MaterialTheme.typography.titleMedium)
         Text("Repository: ${BuildConfig.SELF_REPO}, base ${BuildConfig.SELF_BASE_BRANCH}")
+        Text("Signed for self-update: ${if (BuildConfig.SIGNED_FOR_UPDATE) "yes (shared key)" else "no (default debug key)"}", style = MaterialTheme.typography.bodySmall)
+        KeysSection(vm)
         Text("Bundled knowledge base: ${vm.kb.source.paths.size} files", style = MaterialTheme.typography.titleSmall)
         vm.kb.source.paths.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = { showNotes = !showNotes }) { Text(if (showNotes) "Hide ARCHITECTURE.md" else "Show ARCHITECTURE.md") }
         if (showNotes) Text(vm.kb.notes, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/**
+ * Keys live in app-private storage so they survive the app replacing itself with a CI build that
+ * has none. A local build seeds them; this is the fallback for a phone that never had one.
+ */
+@Composable
+private fun KeysSection(vm: HealViewModel) {
+    var anthropic by remember { mutableStateOf("") }
+    var github by remember { mutableStateOf("") }
+    Spacer(Modifier.height(8.dp))
+    Text("Keys: ${if (vm.secrets.hasAnthropic) "Anthropic" else "no Anthropic"}, ${if (vm.secrets.hasGitHub) "GitHub" else "no GitHub"} (${vm.secrets.source})", style = MaterialTheme.typography.titleSmall)
+    OutlinedTextField(anthropic, { anthropic = it }, label = { Text("Anthropic API key (leave empty to keep)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+    OutlinedTextField(github, { github = it }, label = { Text("GitHub token: contents, pull requests, actions") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+    OutlinedButton(onClick = { vm.storeKeys(anthropic, github); anthropic = ""; github = "" }, enabled = anthropic.isNotBlank() || github.isNotBlank()) { Text("Store on this phone") }
 }
 
 private fun timeOf(ms: Long): String = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ms))

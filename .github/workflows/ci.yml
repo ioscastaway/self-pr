@@ -1,7 +1,10 @@
 name: ci
 
 # The verification step the app cannot run on itself. Every pull request, including the ones the
-# app opens about its own crashes, gets a JVM test run and a debug build.
+# app opens about its own crashes, gets a JVM test run and a debug build. The APK is uploaded as
+# an artifact, signed with the same key as the build on the phone, so the app can install it
+# (stage 4). Without the signing secrets the build still runs; the APK just cannot update the
+# installed app.
 on:
   pull_request:
   push:
@@ -17,9 +20,22 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Signing key
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.SELF_PR_KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/self-pr-update.jks"
+          echo "SELF_PR_KEYSTORE=$RUNNER_TEMP/self-pr-update.jks" >> "$GITHUB_ENV"
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --console=plain
       - name: Build
+        env:
+          # The revision this APK is. On a pull request HEAD is a merge commit that exists only on
+          # the runner; the app compares against commits it can find on GitHub.
+          SELF_PR_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SELF_PR_KEYSTORE_PASSWORD: ${{ secrets.SELF_PR_KEYSTORE_PASSWORD }}
+          SELF_PR_KEY_ALIAS: ${{ secrets.SELF_PR_KEY_ALIAS }}
         run: ./gradlew assembleDebug --console=plain
       - uses: actions/upload-artifact@v4
         if: success()
