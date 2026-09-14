@@ -46,7 +46,11 @@ class SelfInstaller(private val context: Context) {
         else @Suppress("DEPRECATION") context.packageManager.getInstallerPackageName(context.packageName)
     }.getOrNull()
 
-    fun install(apk: File) {
+    private var onFailure: () -> Unit = {}
+
+    /** `onFailure` runs when the system reports the session failed, so the caller can forget what it wrote before the commit. */
+    fun install(apk: File, onFailure: () -> Unit = {}) {
+        this.onFailure = onFailure
         _status.value = Status.Idle
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -80,6 +84,7 @@ class SelfInstaller(private val context: Context) {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $s"
                 Log.w(TAG, "install failed: $msg")
                 _status.value = Status.Failed(msg)
+                onFailure()
             }
         }
     }

@@ -88,7 +88,7 @@ class Updater(
             _phase.value = Phase.Installing(build)
             // Written before the commit: the process does not survive a successful install.
             prefs.edit().putString(PENDING, json.encodeToString(PendingUpdate(runningSha, build.headSha, build.runNumber, System.currentTimeMillis()))).apply()
-            installer.install(apk)
+            installer.install(apk) { prefs.edit().remove(PENDING).apply() }
         }.onFailure { _phase.value = Phase.Failed(it.message ?: it.toString(), decision) }
     }
 
