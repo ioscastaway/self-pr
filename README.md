@@ -2,20 +2,25 @@
 
 An Android app that carries its own source code, catches its own crashes, diagnoses them against
 that source with Claude, and opens a pull request on its own repository with the fix. CI builds the
-PR; a human merges. The app cannot run its own tests, so it files the paperwork instead.
+PR; a human merges; the app downloads the build CI made of the merge and installs it over itself.
+The app cannot run its own tests, so it files the paperwork instead, and then it collects the
+result.
 
-> Stage 3 of the Evolving App series. Stage 1 taught an app to rewrite its rules. This one is
-> about rewriting code, and about the one thing an app can never do for itself: prove the patch
-> works. So the app does what any engineer without a build machine does. It opens a PR and lets
-> CI argue.
+> Stages 3 and 4 of the Evolving App series. Stage 1 taught an app to rewrite its rules. Stage 3
+> is about rewriting code, and about the one thing an app can never do for itself: prove the
+> patch works. So the app does what any engineer without a build machine does. It opens a PR and
+> lets CI argue. Stage 4 is the part iOS does not have a public path for: the app installs the
+> verdict.
 
-**Series:** Evolving App (stage 3) · Android × AI
-**Status:** the loop has closed twice. On 2026-09-13 the app crashed on the Android 16 emulator,
+**Series:** Evolving App (stages 3 and 4) · Android × AI
+**Status:** the stage 3 loop has closed twice. On 2026-09-13 the app crashed on the Android 16 emulator,
 diagnosed itself at its next launch, and opened [#1](https://github.com/ioscastaway/self-pr/pull/1)
 (decimal bill amount) and [#3](https://github.com/ioscastaway/self-pr/pull/3) (empty history), each
 with a fix and a new test. CI passed on both and both are merged, so the host feature is now
 fixed by its own app and needs new first-draft bugs. The table at the bottom of *Experiment* is
-the running log.
+the running log. Stage 4 (2026-09-14, [#4](https://github.com/ioscastaway/self-pr/pull/4)) runs
+end to end on the Android 16 emulator up to the system's install dialog; the first successful
+self-install is waiting on the CI signing secrets, see *Stage 4* under *Experiment*.
 
 ## Why I built this
 
@@ -53,7 +58,10 @@ one has no third-party path on iOS.
   when the system has one, readable at the next launch.
 - `assets/` and `BuildConfig`: the build puts a zip of the app's sources and its git revision into
   the APK, so the running app is its own source of truth.
-- `PackageInstaller` (stage 4, not yet): the reason this loop is worth closing on Android.
+- `PackageInstaller`: an app can open a session, stream an APK into it and commit; the system
+  asks the user, checks that the new APK is signed with the same key as the installed one, swaps
+  the package and kills the process. Any app can do this to itself, given the per-app "Install
+  unknown apps" grant. This is stage 4, and the reason the loop is worth closing on Android.
 
 ## Experiment
 
@@ -87,6 +95,46 @@ crash ──► CrashCollector ──► CrashReport (trace, build, device)
 Two taps on purpose. The diagnosis is shown in full, every patched file included, before the
 button that publishes exists.
 
+### Stage 4: installing the result
+
+CI already uploaded the APK of every build as an artifact. Stage 4 is the app going to get it.
+
+```
+Update tab, tap 1: Ask CI
+              GitHubBuilds: newest successful run of ci.yml on the channel (a branch; main by default)
+                                   │
+              GitHub compare: <this build's commit>...<the run's commit>
+                                   │
+              UpdateDecision: that is this build / ahead by N commits (these ones, from PR #M) /
+                             sideways (behind, diverged) / unknown (this build's commit is not on GitHub)
+                                   │  Update tab, tap 2: Install run #N over this app
+              artifact zip ──► ApkExtractor (exactly one .apk, no `..`) ──► cache
+                                   │
+              prefs: "pending: from <sha> to <sha>, run #N"        written first; nothing after commit survives
+                                   │
+              PackageInstaller session ──► commit ──► the system's dialog, tap 3 ──► signature check
+                                   │
+              swap, process killed ──► next launch: "this launch is the build the app asked for"
+```
+
+The channel is a branch name so the loop can be tested before the merge: pointed at a pull
+request's branch it installs that PR's CI build. Pointed at `main`, it installs merged work,
+which after stage 3 means the app's own fixes.
+
+What actually happened on the Android 16 emulator, 2026-09-14, from the build in #4:
+
+| Step | Result |
+|---|---|
+| Ask CI on `main` | run #10, `push`, the same commit as the running build: "That is this build. Nothing to install." |
+| Ask CI on `feat/self-update` | run #11, `pull_request`, ahead by 1 commit, listed by subject |
+| Install run #11 | 88 MB artifact zip downloaded and unpacked, session committed, the system asked "Do you want to update this app?" |
+| Tap Update | `INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package com.ioscastaway.selfpr signatures do not match newer version` |
+
+The refusal is correct. CI had no signing key that run and used the runner's throwaway debug key;
+the build on the emulator carries the shared key. Android will not let a package replace itself
+with one signed differently, whoever asks. The same install with the key in CI is the next row
+of this table.
+
 ### Pull requests the app has opened about itself
 
 | # | Crash | What the app proposed | CI | Merged |
@@ -97,9 +145,12 @@ button that publishes exists.
 ## Architecture
 
 `healer/` is pure Kotlin with no Android imports: trace parsing, the source index, the diagnosis
-model and prompt, the validator, the pull-request plan with its request bodies. All of it runs in
-JVM tests. `platform/` holds the crash collector, the JSON store, the knowledge base reader, the
-Claude diagnoser, the GitHub publisher, and the `Healer` that chains them. The package map, the
+model and prompt, the validator, the pull-request plan with its request bodies. `updater/` is the
+same for stage 4: the parsers for GitHub's runs, artifacts and compare responses, the update
+decision, the APK extractor, the pending-update record. All of it runs in JVM tests. `platform/`
+holds the crash collector, the JSON store, the knowledge base reader, the Claude diagnoser, the
+GitHub publisher and the `Healer` that chains them; and for stage 4 `GitHubBuilds`,
+`SelfInstaller` around the `PackageInstaller` session, and the `Updater` that chains those. The package map, the
 loop and the invariants are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), which the build
 bundles as an asset and the app hands to the model together with its source.
 
@@ -145,6 +196,41 @@ a file is not in that list the app cannot see it and will not patch it.
   outside the bundle would need to know about. It did not touch the two bugs it had already
   fixed in #1, because #1 was not merged and the bundled source it saw was still the original.
 
+- **The signing key is the whole trust story of stage 4.** Android's rule is simple: a package
+  can only be replaced by one signed with the same key. So the phone's build and CI's build have
+  to share a key, which means the key lives outside the repository and inside CI's secrets. Read
+  the other way: whoever holds that key and can make CI run can put code on the phone, one
+  dialog away. For this experiment that is the author, on a repository where the app itself
+  opens pull requests and a human merges. The key is the line between "the app updates itself"
+  and "anyone updates the app".
+- **Android checks the signature after the user says yes, not before.** The dialog came up,
+  "Update" was tapped, and only then did the session fail with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+  The app cannot check either: a third-party app cannot read the signing certificate out of an
+  APK it has not installed without parsing it by hand. So the Update tab warns from
+  `BuildConfig.SIGNED_FOR_UPDATE` on the running side, and takes the system's word on the other.
+- **"Is this newer than me" is a question for GitHub, not for version codes.** The build knows
+  its commit; CI's run knows its commit; `compare/a...b` says `ahead`, `behind`, `identical` or
+  `diverged` and lists the commits in between with their `(#N)` squash suffixes. That is a
+  changelog the app did not have to write. When the running build's commit is not on GitHub (a
+  local build of uncommitted work), compare 404s and the app says it is installing blind rather
+  than guessing.
+- **A pull request's run does not build the commit you think.** CI checks out a merge commit
+  that exists only on the runner, so `git rev-parse HEAD` there names a revision GitHub's API
+  has never heard of. The workflow passes `github.event.pull_request.head.sha` into the build
+  instead. Without that, every PR build would look like an update to itself forever.
+- **The APK arrives inside a zip that needs a token.** Artifacts download as a zip of whatever
+  was uploaded, and the endpoint is authenticated even on a public repository. The fine-grained
+  token from stage 3 turned out to be enough. Releases would be simpler to download and would
+  not expire after ninety days; artifacts were already there.
+- **Nothing after `commit` runs.** A successful self-update kills the process, so the app writes
+  what it is about to do before it does it, and the next launch decides whether it is the build
+  it asked for. An install that fails runs the callback and forgets the note. This is the same
+  shape as the crash handler in stage 3: write first, reason later.
+- **Keys had to move out of the APK.** A CI build has no `local.properties`, so a stage 4 build
+  would arrive with no Anthropic key and no GitHub token and stage 3 would stop working after
+  the first update. App data survives an update, so the keys are copied into app-private storage
+  by the local build and inherited by every build that replaces it.
+
 ## iOS comparison
 
 | | Android | iOS |
@@ -152,9 +238,13 @@ a file is not in that list the app cannot see it and will not patch it.
 | Read the app's own crash and ANR history at next launch | `ApplicationExitInfo`, on demand | `MetricKit`, delivered on the system's schedule |
 | Bundle the app's own source | `assets/` | Bundle resources; equivalent |
 | Ask a model for a patch, open a PR | HTTP | HTTP; equivalent |
-| Install the resulting build (stage 4) | `PackageInstaller`, user-confirmed | No third-party path outside the App Store and TestFlight |
+| Know which commit you are and whether CI has a newer one | `BuildConfig` + GitHub compare | Same; portable |
+| Install the resulting build (stage 4) | `PackageInstaller`: a session, a system dialog, a signature check | No third-party path. App Store and TestFlight are the only installers of third-party code; there is no API for an app to hand the system a replacement of itself |
 
-Stage 3 is portable. Its value is that stage 4 is not.
+Stage 3 is portable. Its value is that stage 4 is not. The precise statement: iOS has no public
+API through which a third-party app can install or update a package, its own included; on
+Android the API is public, gated by a per-app grant and a per-install dialog, and bound by the
+signing key.
 
 ## Limitations
 
@@ -174,6 +264,20 @@ Stage 3 is portable. Its value is that stage 4 is not.
   `max_tokens` and the diagnoser says so rather than applying a truncated file.
 - **Crashes outside the bundle** (framework, SDKs, Compose internals) produce no own frames and
   are reported as undiagnosable.
+- **Stage 4 is three confirmations deep and stays there.** Ask CI, then Install, then the system's
+  own dialog; plus the one-time "Install unknown apps" grant in Settings. The app never checks
+  or installs on its own. Removing any of these is a policy decision, not a code change.
+- **The signing key is a secret with the reach of a root shell on this one app.** It is kept
+  outside the repository, in `local.properties` locally and in repository secrets in CI. Rotating
+  it means uninstalling the app on every device, because that is exactly what Android forbids
+  doing in place.
+- **Artifacts expire** after ninety days; a `main` that has not moved for that long has nothing
+  to install. The app reports the expired artifact rather than reaching for an older run.
+- **Update ownership is not requested.** Android 14's `setRequestUpdateOwnership` would make
+  the app the only installer allowed to update it silently; this experiment leaves adb and Play
+  able to replace it, which is what testing needs.
+- **Play Protect and OEM gates** were not exercised: the emulator image has no Play Protect
+  scanning, and the Galaxy Z Fold 8 has not been through this loop yet.
 
 ## Setup
 
@@ -182,7 +286,10 @@ Stage 3 is portable. Its value is that stage 4 is not.
 ```
 sdk.dir=...
 ANTHROPIC_API_KEY=...
-GITHUB_TOKEN=...      # fine-grained, this repository only, contents + pull requests: write
+GITHUB_TOKEN=...      # fine-grained, this repository only, contents + pull requests: write (actions: read for stage 4)
+SELF_PR_KEYSTORE=/absolute/path/outside/the/repo/self-pr-update.jks   # stage 4, see below
+SELF_PR_KEYSTORE_PASSWORD=...
+SELF_PR_KEY_ALIAS=self-pr
 ```
 
 ```bash
@@ -193,6 +300,21 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Then break the bill splitter, reopen the app, and go to Heal.
 
+For stage 4 the build on the phone and the build CI makes must share a signing key. Make one
+outside the repository, point `local.properties` at it, and give CI the same key as secrets:
+
+```bash
+keytool -genkeypair -keystore ~/.config/ioscastaway/self-pr-update.jks -storetype PKCS12 \
+  -alias self-pr -keyalg RSA -keysize 2048 -validity 10000
+base64 -i ~/.config/ioscastaway/self-pr-update.jks | gh secret set SELF_PR_KEYSTORE_B64
+gh secret set SELF_PR_KEYSTORE_PASSWORD
+gh secret set SELF_PR_KEY_ALIAS --body self-pr
+```
+
+Reinstall once (uninstall first: a key change is the one update Android refuses), grant
+"Install unknown apps" for the app when the Update tab asks, and from then on the Update tab
+installs whatever CI built on `main`.
+
 ## Verdict
 
 Genuinely useful, in the narrow sense that the pull request it opened is one I would have merged
@@ -201,10 +323,18 @@ feature proves the pipeline and nothing about the hit rate. The honest claim is 
 Android app can capture its own death, read its own source, argue for a fix and file it, with
 public APIs and two taps, and the only thing it cannot do for itself is the one thing CI does.
 
+Stage 4, so far: every step up to the system's signature check ran on the emulator, and the
+check refused an unsigned CI build for exactly the reason it should. Whether the loop closes is
+now a matter of three repository secrets, and the table under *Stage 4* will say when it did.
+
 ## Next
 
-- **Stage 4**: CI uploads the APK; the app fetches the build for a merged PR and updates itself
-  through `PackageInstaller`. The loop closes.
+- **Stage 4, closed**: the first self-install with a signed CI build, recorded in the table
+  above; then the same on the Galaxy Z Fold 8, where Play Protect and One UI get a say.
+- **Check on launch**: the Update tab could ask CI at every start and show a badge; installing
+  should stay behind the taps.
+- **Update ownership**: `setRequestUpdateOwnership` once the loop has run enough times that
+  adb is no longer the main way the app gets onto the phone.
 - **Diagnose on launch**: today both steps are behind a tap. With a token scoped to one repository
   the first step could run on its own; the second should stay behind a human until the table
   above earns it.

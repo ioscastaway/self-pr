@@ -18,10 +18,13 @@ class HealViewModel(app: Application) : AndroidViewModel(app) {
     val store get() = graph.store
     val healer get() = graph.healer
     val kb get() = graph.knowledgeBase
+    val secrets get() = graph.secrets
+    val updater get() = graph.updater
+    val installer get() = graph.installer
 
     var busy by mutableStateOf<String?>(null)
         private set
-    var message by mutableStateOf<String?>(null)
+    var message by mutableStateOf<String?>(App.arrival?.let { "This launch is the build the app installed on itself: ${it.fromSha.take(7)} → ${it.toSha.take(7)} (CI run #${it.runNumber})." })
 
     // ---- the host feature ----
     var amount by mutableStateOf("")
@@ -65,6 +68,11 @@ class HealViewModel(app: Application) : AndroidViewModel(app) {
             busy = null
         }
     }
+
+    // ---- stage 4 ----
+    fun checkForBuild() { viewModelScope.launch { updater.check() } }
+    fun installBuild(d: com.ioscastaway.selfpr.updater.UpdateDecision) { viewModelScope.launch { updater.install(d) } }
+    fun storeKeys(anthropic: String, github: String) { secrets.store(anthropic, github); message = "Stored. They stay on this phone and survive the app updating itself." }
 
     fun verdict(d: Diagnosis): PatchValidator.Verdict = healer.validate(d)
     fun linesChanged(p: com.ioscastaway.selfpr.healer.FilePatch) = PatchValidator.linesChanged(p, kb.source)

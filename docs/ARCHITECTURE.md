@@ -18,15 +18,23 @@ com.ioscastaway.selfpr
 │   ├── SourceIndex         path → content of the bundled tree; class name → path; test next to main
 │   ├── Diagnosis           Diagnosis, FilePatch, Diagnoser seam, PatchValidator, HealPrompt (+ schema)
 │   └── PullRequestPlan     branch name, commit message, PR title/body, GitHub request bodies
+├── updater/                Pure Kotlin. No Android imports. Stage 4's logic
+│   ├── CiBuild             CiBuild, CiArtifact, CommitSummary, Comparison; GitHubJson parsers
+│   ├── UpdateDecision      UpToDate / Available / Sideways / Unknown / NoBuild from sha + compare
+│   ├── ApkExtractor        the one APK out of the artifact zip; refuses none, two, or `..`
+│   └── UpdateLog           PendingUpdate (written before commit) → UpdateRecord (next launch)
 ├── platform/               Everything that touches Android or the network
 │   ├── CrashCollector      uncaught handler → file; ApplicationExitInfo → CrashReport
 │   ├── HealStore           files/heal/crashes.json + records.json, StateFlows
 │   ├── KnowledgeBase       assets/source.zip + assets/ARCHITECTURE.md, read once
-│   ├── Secrets             BuildConfig keys → Anthropic client / GitHub token
+│   ├── Secrets             keys: BuildConfig at build time, app-private prefs across updates
 │   ├── ClaudeDiagnoser     Diagnoser over the Anthropic SDK, structured output, one call
 │   ├── GitHubPublisher     REST: base ref → branch → contents PUT per file → pull request
+│   ├── GitHubBuilds        REST: workflow runs → artifacts → compare → artifact zip download
+│   ├── SelfInstaller       PackageInstaller session + InstallResultReceiver; the install grant
+│   ├── Updater             stage 4's chain: check → download → extract → pending record → install
 │   └── Healer              the loop; validation and the confidence gate live here
-└── ui/                     Compose. MainActivity, HealViewModel, SelfPrApp (Split / Heal / About)
+└── ui/                     Compose. MainActivity, HealViewModel, SelfPrApp (Split / Heal / Update / About)
 ```
 
 ## The loop
@@ -48,11 +56,33 @@ Heal tab, Open pull request
   → GitHubPublisher.open: GET git/ref/heads/main → POST git/refs → PUT contents/<path> ×N → POST pulls
   → HealRecord(FILED, prUrl)
 GitHub Actions (.github/workflows/ci.yml)
-  → testDebugUnitTest + assembleDebug on the pull request; the APK is an artifact
+  → testDebugUnitTest + assembleDebug on the pull request; the APK is an artifact, signed with
+    the shared key when the secrets are present
 a human merges
+  → the push to main runs CI again; that run's artifact is the build the app can become
+Update tab, Ask CI                                                    (stage 4)
+  → GitHubBuilds.latest(channel): newest successful run of ci.yml on the branch
+  → GitHubBuilds.compare(BuildConfig.GIT_SHA, run.head_sha) unless they are the same commit
+  → UpdateDecision.decide: UpToDate / Available (ahead, lists commits and PRs) / Sideways / Unknown
+Update tab, Install
+  → GitHubBuilds.artifacts(run) → the `app-debug` artifact → download zip → ApkExtractor
+  → prefs: PendingUpdate(from, to, run)          written first; the process will not survive
+  → SelfInstaller.install: PackageInstaller session, write, commit(PendingIntent → receiver)
+  → STATUS_PENDING_USER_ACTION: the system's install dialog; the user taps
+  → the system verifies the signature matches, swaps the package, kills this process
+next launch
+  → Updater.arrive: PendingUpdate.to matches GIT_SHA → UpdateRecord appended to history
 ```
 
 ## Invariants
+
+- Stage 4 is behind two taps as well: Ask CI shows the run, the commits and the pull requests in
+  it before an install button exists; the system's own dialog is a third confirmation. The app
+  never checks or installs on its own.
+- The app can only install a build signed with the key it already carries. That is Android's
+  rule, not the app's; the app cannot weaken it. `BuildConfig.SIGNED_FOR_UPDATE` records which
+  key a build has so the Update tab can explain a refusal before it happens.
+- Keys survive the update in app-private storage (`Secrets`), never in the APK CI makes.
 
 - `healer/` never imports `android.*`.
 - The app never publishes without two taps: Diagnose, then Open pull request. The diagnosis is

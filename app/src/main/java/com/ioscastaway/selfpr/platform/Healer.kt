@@ -18,14 +18,14 @@ import com.ioscastaway.selfpr.healer.TraceParser
 class Healer(
     private val store: HealStore,
     private val kb: KnowledgeBase,
-    private val diagnoser: Diagnoser?,
-    private val publisher: GitHubPublisher?,
+    private val diagnoser: () -> Diagnoser?,
+    private val publisher: () -> GitHubPublisher?,
 ) {
-    val canDiagnose: Boolean get() = diagnoser != null
-    val canFile: Boolean get() = publisher != null
+    val canDiagnose: Boolean get() = diagnoser() != null
+    val canFile: Boolean get() = publisher() != null
 
     suspend fun diagnose(crash: CrashReport): HealRecord {
-        val d = diagnoser ?: return fail(crash, "No ANTHROPIC_API_KEY in this build.")
+        val d = diagnoser() ?: return fail(crash, "No ANTHROPIC_API_KEY in this build.")
         return runCatching {
             val frames = TraceParser.ownFrames(crash.trace, BuildConfig.APPLICATION_ID)
             val files = kb.source.filesFor(frames).toMutableList()
@@ -41,7 +41,7 @@ class Healer(
     fun validate(d: Diagnosis): PatchValidator.Verdict = PatchValidator.validate(d, kb.source)
 
     suspend fun file(crash: CrashReport): HealRecord {
-        val p = publisher ?: return fail(crash, "No GITHUB_TOKEN in this build.")
+        val p = publisher() ?: return fail(crash, "No GITHUB_TOKEN in this build.")
         val current = store.records.value[crash.id]
         val d = current?.diagnosis ?: return fail(crash, "Diagnose first.")
         val verdict = validate(d)
